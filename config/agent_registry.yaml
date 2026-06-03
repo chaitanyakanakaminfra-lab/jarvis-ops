@@ -1,0 +1,206 @@
+agents:
+
+  - id: cicd_pipeline
+    name: CI/CD Pipeline Agent
+    module: agents.cicd.agent
+    class: CICDAgent
+    category: cicd
+    voice_enabled: true
+    voice_phrases: ["run the pipeline", "start the build", "trigger ci", "deploy"]
+    triggers:
+      - type: github_pr
+        events: [opened, synchronize]
+      - type: manual
+    tools: [argo_tool, github_tool]
+    description: Triggers builds, runs tests, and deploys on PR or voice command
+
+  - id: lint_quality
+    name: Lint & Code Quality Agent
+    module: agents.lint.agent
+    class: LintAgent
+    category: cicd
+    voice_enabled: true
+    voice_phrases: ["check code quality", "run lint", "check my code"]
+    triggers:
+      - type: github_pr
+        events: [opened, synchronize]
+    tools: [argo_tool, github_tool]
+    description: Runs ruff, shellcheck, ansible-lint and reports results
+
+  - id: docker_image
+    name: Docker & Image Agent
+    module: agents.docker_image.agent
+    class: DockerImageAgent
+    category: cicd
+    voice_enabled: true
+    voice_phrases: ["mirror the images", "build the docker image", "push to ecr"]
+    triggers:
+      - type: github_push
+        branches: [main]
+    tools: [argo_tool, cloud_tool]
+    description: Builds Docker images, scans for CVEs, mirrors to ECR
+
+  - id: release_versioning
+    name: Release & Versioning Agent
+    module: agents.release.agent
+    class: ReleaseAgent
+    category: cicd
+    voice_enabled: true
+    voice_phrases: ["cut a release", "create a new release", "tag the release"]
+    triggers:
+      - type: manual
+    tools: [github_tool]
+    description: Manages semver tagging, changelogs, and GitHub releases
+
+  - id: infra_provisioning
+    name: Infra Provisioning Agent
+    module: agents.infra_provisioning.agent
+    class: InfraProvisioningAgent
+    category: infrastructure
+    voice_enabled: true
+    voice_phrases: ["provision the cluster", "plan the infra", "apply terraform"]
+    triggers:
+      - type: manual
+    tools: [terraform_tool, cloud_tool]
+    description: Runs Terraform plan/apply for EKS clusters and VPCs
+
+  - id: kubernetes_ops
+    name: Kubernetes Ops Agent
+    module: agents.kubernetes_ops.agent
+    class: KubernetesOpsAgent
+    category: infrastructure
+    voice_enabled: true
+    voice_phrases: ["check the cluster", "any crash loops", "rollback the deployment"]
+    triggers:
+      - type: schedule
+        cron: "*/15 * * * *"
+      - type: manual
+    tools: [cloud_tool]
+    description: Monitors pod health, detects crash loops, performs rollbacks
+
+  - id: cloud_config
+    name: Cloud Config Agent
+    module: agents.cloud_config.agent
+    class: CloudConfigAgent
+    category: infrastructure
+    voice_enabled: true
+    voice_phrases: ["audit cloud config", "check iam policies", "any security group issues"]
+    triggers:
+      - type: schedule
+        cron: "0 9 * * *"
+      - type: manual
+    tools: [cloud_tool]
+    description: Audits IAM drift, VPC rules, and security group violations
+
+  - id: dr_backup
+    name: DR & Backup Agent
+    module: agents.dr_backup.agent
+    class: DRBackupAgent
+    category: infrastructure
+    voice_enabled: true
+    voice_phrases: ["run a backup", "backup everything", "restore drill"]
+    triggers:
+      - type: schedule
+        cron: "0 2 * * *"
+      - type: manual
+    tools: [cloud_tool]
+    description: Automates S3 and RDS backups and runs restore drills
+
+  - id: cost_optimization
+    name: Cost Optimization Agent
+    module: agents.cost_optimization.agent
+    class: CostOptimizationAgent
+    category: cost
+    voice_enabled: true
+    voice_phrases: ["how are cloud costs", "any cost savings", "whats my aws spend"]
+    triggers:
+      - type: schedule
+        cron: "0 8 * * 1"
+      - type: manual
+    tools: [cloud_tool]
+    description: Queries Cost Explorer, detects idle resources, suggests rightsizing
+
+  - id: autoscaling
+    name: Auto-Scaling Agent
+    module: agents.autoscaling.agent
+    class: AutoScalingAgent
+    category: cost
+    voice_enabled: true
+    voice_phrases: ["scale down staging", "scale up production", "adjust the cluster size"]
+    triggers:
+      - type: cloudwatch_alarm
+      - type: manual
+    tools: [cloud_tool]
+    description: Scales EKS node groups based on load and cost thresholds
+
+  - id: security_scanning
+    name: Security Scanning Agent
+    module: agents.security_scanning.agent
+    class: SecurityScanningAgent
+    category: security
+    voice_enabled: true
+    voice_phrases: ["scan for vulnerabilities", "run security scan", "check for cves"]
+    triggers:
+      - type: github_pr
+        events: [opened]
+      - type: schedule
+        cron: "0 23 * * *"
+      - type: manual
+    tools: [argo_tool, github_tool]
+    description: Runs Trivy CVE scan, Bandit SAST, detect-secrets
+
+  - id: compliance
+    name: Compliance Agent
+    module: agents.compliance.agent
+    class: ComplianceAgent
+    category: security
+    voice_enabled: true
+    voice_phrases: ["run compliance check", "cis benchmark", "any policy violations"]
+    triggers:
+      - type: schedule
+        cron: "0 6 * * 1"
+      - type: manual
+    tools: [cloud_tool]
+    description: Evaluates CIS AWS benchmark, generates audit reports
+
+  - id: observability
+    name: Observability Agent
+    module: agents.observability.agent
+    class: ObservabilityAgent
+    category: observability
+    voice_enabled: true
+    voice_phrases: ["hows the system", "system health", "any alerts", "check slos"]
+    triggers:
+      - type: schedule
+        cron: "*/5 * * * *"
+      - type: manual
+    tools: [cloud_tool]
+    description: Monitors CloudWatch metrics, SLOs, and log anomalies
+
+  - id: incident_response
+    name: Incident Response Agent
+    module: agents.incident_response.agent
+    class: IncidentResponseAgent
+    category: observability
+    voice_enabled: true
+    voice_phrases: ["we have an incident", "something is down", "p1 alert", "run the runbook"]
+    triggers:
+      - type: cloudwatch_alarm
+        severity: [critical, high]
+      - type: manual
+    tools: [cloud_tool, slack_tool, argo_tool]
+    description: Detects P1/P2 incidents, executes runbooks, notifies on-call
+
+  - id: reporting
+    name: Reporting & Insights Agent
+    module: agents.reporting.agent
+    class: ReportingAgent
+    category: intelligence
+    voice_enabled: true
+    voice_phrases: ["weekly summary", "give me a report", "how did we do this week"]
+    triggers:
+      - type: schedule
+        cron: "0 9 * * 1"
+      - type: manual
+    tools: [cloud_tool, slack_tool]
+    description: Generates weekly spoken and PDF report across all agent metrics
