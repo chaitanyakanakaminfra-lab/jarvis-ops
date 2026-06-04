@@ -1,1 +1,43 @@
-
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jarvis-voice
+  namespace: jarvis
+  labels:
+    app: jarvis
+    component: voice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jarvis
+      component: voice
+  template:
+    metadata:
+      labels:
+        app: jarvis
+        component: voice
+    spec:
+      containers:
+        - name: voice
+          image: jarvis/voice-server:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ELEVENLABS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: voice-secrets
+                  key: elevenlabs_api_key
+            - name: DEEPGRAM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: voice-secrets
+                  key: deepgram_api_key
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "250m"
