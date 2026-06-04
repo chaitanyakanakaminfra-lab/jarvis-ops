@@ -1,1 +1,60 @@
-
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jarvis-orchestrator
+  namespace: jarvis
+  labels:
+    app: jarvis
+    component: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jarvis
+      component: orchestrator
+  template:
+    metadata:
+      labels:
+        app: jarvis
+        component: orchestrator
+    spec:
+      serviceAccountName: jarvis-workflow-sa
+      containers:
+        - name: orchestrator
+          image: jarvis/orchestrator:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jarvis-secrets
+                  key: groq_api_key
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-secret
+                  key: token
+            - name: CHROMA_HOST
+              value: "jarvis-chromadb"
+            - name: POSTGRES_HOST
+              value: "jarvis-postgres"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
