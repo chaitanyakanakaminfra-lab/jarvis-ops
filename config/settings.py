@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     jarvis_voice_enabled: bool = Field(default=True)
     jarvis_wake_word: str = Field(default="jarvis")
 
-    # LLM
-    openai_api_key: str = Field(...)
-    openai_model: str = Field(default="gpt-4o")
+    # Groq
+    groq_api_key: str = Field(default="")
+    groq_model: str = Field(default="llama-3.3-70b-versatile")
 
     # Voice
     porcupine_access_key: str = Field(...)
