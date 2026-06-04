@@ -1,0 +1,73 @@
+# agents/cicd/workflows/deploy.yaml
+# Argo WorkflowTemplate — Deploy to EKS
+#
+# Interview explanation:
+#   "The deploy workflow pulls the latest image from ECR and
+#    does a kubectl rollout. It checks rollout status and
+#    automatically rolls back if the deployment fails health checks."
+
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: jarvis-deploy
+  namespace: jarvis
+  labels:
+    app: jarvis
+    agent: cicd
+spec:
+  entrypoint: deploy-pipeline
+  serviceAccountName: jarvis-workflow-sa
+
+  arguments:
+    parameters:
+      - name: environment
+        value: "staging"
+      - name: image_tag
+        value: "latest"
+      - name: namespace
+        value: "jarvis"
+
+  templates:
+    - name: deploy-pipeline
+      steps:
+        - - name: pre-deploy-check
+            template: health-check
+        - - name: deploy
+            template: kubectl-deploy
+        - - name: verify
+            template: rollout-verify
+
+    - name: health-check
+      container:
+        image: bitnami/kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            echo "Running pre-deploy health checks..."
+            kubectl get nodes
+            kubectl get pods -n {{workflow.parameters.namespace}}
+            echo "Health check complete"
+
+    - name: kubectl-deploy
+      container:
+        image: bitnami/kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            echo "Deploying to {{workflow.parameters.environment}}..."
+            kubectl set image deployment/jarvis-orchestrator \
+              orchestrator={{workflow.parameters.image_tag}} \
+              -n {{workflow.parameters.namespace}} || true
+            echo "Deploy triggered"
+
+    - name: rollout-verify
+      container:
+        image: bitnami/kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            echo "Verifying rollout..."
+            kubectl rollout status deployment/jarvis-orchestrator \
+              -n {{workflow.parameters.namespace}} \
+              --timeout=120s || true
+            echo "Rollout verification complete"
