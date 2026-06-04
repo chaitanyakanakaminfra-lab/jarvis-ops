@@ -1,0 +1,200 @@
+name: pr-ansible-lint
+
+on:
+  pull_request:
+    paths:
+      - "**.yml"
+      - "**.yaml"
+      - "!.github/**"          # don't self-trigger on workflow changes
+      - "!agents/**/workflows/**"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Playbook file or directory to lint (default: .)"
+        required: false
+        default: "."
+      profile:
+        description: "ansible-lint profile (min|basic|moderate|safety|shared|production)"
+        required: false
+        default: "basic"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ansible-lint:
+    name: ansible-lint — Playbook Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      ANSIBLE_FORCE_COLOR: "1"
+      LINT_PROFILE: ${{ inputs.profile || 'basic' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install ansible-lint and dependencies
+        run: |
+          pip install \
+            ansible-lint==24.2.3 \
+            ansible-core==2.16.6 \
+            jinja2 \
+            yamllint
+          ansible-lint --version
+
+      # -------------------------------------------------------------------
+      # Locate playbooks / roles to lint
+      # -------------------------------------------------------------------
+      - name: Resolve lint target
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+                      | grep -E '\.(yml|yaml)$' \
+                      | grep -v '^\.github/' \
+                      || true)
+            if [ -z "$CHANGED" ]; then
+              echo "target=." >> "$GITHUB_OUTPUT"
+            else
+              echo "target=$CHANGED" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "target=${{ inputs.target || '.' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -------------------------------------------------------------------
+      # yamllint first (fast, catches formatting issues)
+      # -------------------------------------------------------------------
+      - name: yamllint
+        id: yamllint
+        run: |
+          set +e
+          yamllint -d relaxed ${{ steps.target.outputs.target }} \
+            2>&1 | tee /tmp/yamllint.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      # -------------------------------------------------------------------
+      # ansible-lint
+      # -------------------------------------------------------------------
+      - name: ansible-lint
+        id: ansible_lint
+        run: |
+          set +e
+          ansible-lint \
+            --profile "${LINT_PROFILE}" \
+            --format json \
+            ${{ steps.target.outputs.target }} \
+            > /tmp/ansible-lint.json 2>&1
+          AL_EXIT=$?
+          set -e
+
+          # Human-readable version for PR comment
+          ansible-lint \
+            --profile "${LINT_PROFILE}" \
+            --format full \
+            ${{ steps.target.outputs.target }} \
+            > /tmp/ansible-lint.txt 2>&1 || true
+
+          echo "exit_code=$AL_EXIT" >> "$GITHUB_OUTPUT"
+
+          # Count violations by severity
+          ERRORS=$(  jq '[.[] | select(.severity>=2)] | length' /tmp/ansible-lint.json 2>/dev/null || echo 0)
+          WARNINGS=$(jq '[.[] | select(.severity==1)] | length' /tmp/ansible-lint.json 2>/dev/null || echo 0)
+          TOTAL=$(   jq 'length'                                 /tmp/ansible-lint.json 2>/dev/null || echo 0)
+          echo "errors=$ERRORS"     >> "$GITHUB_OUTPUT"
+          echo "warnings=$WARNINGS" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL"       >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------
+      # Consolidated PR comment (yamllint + ansible-lint)
+      # -------------------------------------------------------------------
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // yamllint
+            const yamlOut  = fs.existsSync('/tmp/yamllint.txt')
+              ? fs.readFileSync('/tmp/yamllint.txt', 'utf8').trim()
+              : '';
+            const yamlExit = '${{ steps.yamllint.outputs.exit_code }}';
+
+            // ansible-lint
+            const alOut    = fs.existsSync('/tmp/ansible-lint.txt')
+              ? fs.readFileSync('/tmp/ansible-lint.txt', 'utf8').trim()
+              : '';
+            const alExit   = '${{ steps.ansible_lint.outputs.exit_code }}';
+            const errors   = '${{ steps.ansible_lint.outputs.errors }}'   || '0';
+            const warnings = '${{ steps.ansible_lint.outputs.warnings }}' || '0';
+            const total    = '${{ steps.ansible_lint.outputs.total }}'    || '0';
+            const profile  = process.env.LINT_PROFILE || 'basic';
+
+            const yamlStatus = yamlExit  === '0' ? '✅ Clean' : '⚠️ Issues';
+            const alStatus   = alExit    === '0' ? '✅ Passed' : '❌ Violations';
+
+            const body = [
+              '## 📋 Ansible-Lint Report',
+              '',
+              `**Profile:** \`${profile}\``,
+              '',
+              `| Linter       | Status          |`,
+              `|--------------|-----------------|`,
+              `| yamllint     | ${yamlStatus}   |`,
+              `| ansible-lint | ${alStatus}     |`,
+              '',
+              `**ansible-lint summary:** ${total} total violations (${errors} errors, ${warnings} warnings)`,
+              '',
+              yamlOut ? `<details><summary>yamllint output</summary>\n\n\`\`\`\n${yamlOut}\n\`\`\`\n</details>` : '',
+              alOut   ? `<details><summary>ansible-lint output</summary>\n\n\`\`\`\n${alOut}\n\`\`\`\n</details>`  : '',
+              '',
+              '_Triggered by Jarvis Lint Agent — Day 9 (adapted from IBM Argo migration work)_',
+            ].filter(Boolean).join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Ansible-Lint Report')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      # -------------------------------------------------------------------
+      # Gate: fail the job on any error-level violations
+      # -------------------------------------------------------------------
+      - name: Enforce lint gate
+        if: >
+          steps.yamllint.outputs.exit_code != '0' ||
+          steps.ansible_lint.outputs.exit_code != '0'
+        run: |
+          echo "::error::Lint gate failed. Resolve yamllint and ansible-lint violations before merging."
+          exit 1
