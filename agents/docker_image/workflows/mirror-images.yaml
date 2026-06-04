@@ -1,0 +1,87 @@
+# agents/docker_image/workflows/mirror-images.yaml
+# Argo WorkflowTemplate — Mirror images to ECR
+#
+# Interview explanation:
+#   "This is a direct port of the mirror-images Tekton pipeline I
+#    migrated at IBM. It pulls images from the source registry and
+#    pushes them to ECR. The pattern is identical — git artifact
+#    clone, credential injection via ExternalSecrets, mirror step."
+
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: jarvis-mirror-images
+  namespace: jarvis
+  labels:
+    app: jarvis
+    agent: docker
+spec:
+  entrypoint: mirror-pipeline
+  serviceAccountName: jarvis-workflow-sa
+
+  arguments:
+    parameters:
+      - name: source_registry
+        value: "docker.io"
+      - name: target_registry
+        value: ""    # filled from ECR_REGISTRY env
+
+  templates:
+    - name: mirror-pipeline
+      steps:
+        - - name: ecr-login
+            template: ecr-authenticate
+        - - name: mirror-orchestrator
+            template: mirror-image
+            arguments:
+              parameters:
+                - name: image
+                  value: "jarvis/orchestrator"
+        - - name: mirror-voice
+            template: mirror-image
+            arguments:
+              parameters:
+                - name: image
+                  value: "jarvis/voice-server"
+
+    - name: ecr-authenticate
+      container:
+        image: amazon/aws-cli:latest
+        command: [sh, -c]
+        args:
+          - |
+            echo "Authenticating with ECR..."
+            aws ecr get-login-password --region ${AWS_DEFAULT_REGION} \
+              | docker login --username AWS \
+                --password-stdin ${ECR_REGISTRY}
+            echo "ECR authentication successful"
+        env:
+          - name: AWS_DEFAULT_REGION
+            value: "us-east-1"
+          - name: ECR_REGISTRY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: ecr_registry
+
+    - name: mirror-image
+      inputs:
+        parameters:
+          - name: image
+      container:
+        image: docker:24-dind
+        command: [sh, -c]
+        args:
+          - |
+            IMAGE="{{inputs.parameters.image}}"
+            echo "Mirroring ${IMAGE}..."
+            docker pull ${IMAGE}:latest
+            docker tag ${IMAGE}:latest ${ECR_REGISTRY}/${IMAGE}:latest
+            docker push ${ECR_REGISTRY}/${IMAGE}:latest
+            echo "Mirrored ${IMAGE} successfully"
+        env:
+          - name: ECR_REGISTRY
+            valueFrom:
+              secretKeyRef:
+                name: aws-secrets
+                key: ecr_registry
