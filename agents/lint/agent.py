@@ -2,15 +2,6 @@
 agents/lint/agent.py
 ─────────────────────
 Lint & Code Quality Agent — runs ruff, shellcheck, and ansible-lint.
-
-Interview explanation:
-  "The Lint agent is Jarvis's code quality enforcer. It listens for
-   voice commands like 'run ruff on agents/' or 'shellcheck all scripts',
-   runs the appropriate linter locally or triggers a GitHub Actions
-   workflow_dispatch, and speaks the result back.
-
-   It inherits from BaseAgent — logging, run history, timing, and error
-   handling are all free. I only had to implement _run()."
 """
 
 import asyncio
@@ -38,12 +29,7 @@ from agents.lint.voice_responses import (
 
 logger = structlog.get_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# GitHub helpers
-# ---------------------------------------------------------------------------
-
-GITHUB_API = "https://api.github.com"
-
+GITHUB_API   = "https://api.github.com"
 _WORKFLOW_MAP = {
     LintTool.RUFF:         "pr-ruff.yaml",
     LintTool.SHELLCHECK:   "pr-shellcheck.yaml",
@@ -60,7 +46,6 @@ async def _gh_post(path: str, payload: dict, token: str) -> dict:
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(f"{GITHUB_API}{path}", headers=headers, json=payload)
         r.raise_for_status()
-        # 204 No Content on successful dispatch
         return r.json() if r.content else {}
 
 
@@ -75,10 +60,6 @@ async def _gh_get(path: str, token: str) -> dict | list:
         r.raise_for_status()
         return r.json()
 
-
-# ---------------------------------------------------------------------------
-# Local lint runners
-# ---------------------------------------------------------------------------
 
 def _run_ruff(target: str) -> dict:
     try:
@@ -103,11 +84,9 @@ def _run_shellcheck(target: str) -> dict:
             files = list(Path(".").rglob("*.sh"))
         else:
             files = [Path(target)]
-
         if not files:
             return {"tool": LintTool.SHELLCHECK, "exit_code": 0,
                     "issues": [], "issue_count": 0}
-
         result = subprocess.run(
             ["shellcheck", "--format=json"] + [str(f) for f in files],
             capture_output=True, text=True, timeout=60,
@@ -144,14 +123,9 @@ def _run_ansible_lint(target: str) -> dict:
                 "error": "ansible-lint timed out after 120 seconds"}
 
 
-# ---------------------------------------------------------------------------
-# Intent classifier
-# ---------------------------------------------------------------------------
-
 def _classify(command: str) -> dict:
     cmd = command.lower()
 
-    # Tool
     tool = None
     if any(k in cmd for k in ("ruff", "python lint", "pep8")):
         tool = LintTool.RUFF
@@ -160,14 +134,12 @@ def _classify(command: str) -> dict:
     elif any(k in cmd for k in ("ansible", "playbook lint")):
         tool = LintTool.ANSIBLE_LINT
 
-    # Target path
     target = "."
     for word in command.split():
         if "/" in word or word.endswith((".py", ".sh", ".yml", ".yaml")):
             target = word
             break
 
-    # Action
     if any(k in cmd for k in ("trigger", "workflow", "github action", "ci lint")):
         return {"action": "trigger", "tool": tool, "target": target}
     if any(k in cmd for k in ("status", "last run", "latest")):
@@ -182,13 +154,9 @@ def _classify(command: str) -> dict:
     return {"action": "unknown", "tool": None, "target": target}
 
 
-# ---------------------------------------------------------------------------
-# LintAgent
-# ---------------------------------------------------------------------------
-
 class LintAgent(BaseAgent):
 
-    agent_id   = "lint"
+    agent_id   = "lint_quality"
     agent_name = "Lint & Code Quality Agent"
 
     def __init__(self):
@@ -203,47 +171,37 @@ class LintAgent(BaseAgent):
         tool   = intent["tool"]
         target = intent["target"]
 
-        self._log.info("lint.intent", action=action, tool=tool, target=target)
+        self._log.info("lint.intent", action=action, tool=str(tool), target=target)
 
-        # ── run single linter locally ────────────────────────────────────
         if action == "run" and tool:
-            self._log.info(lint_running(tool, target))
-
             runners = {
                 LintTool.RUFF:         _run_ruff,
                 LintTool.SHELLCHECK:   _run_shellcheck,
                 LintTool.ANSIBLE_LINT: _run_ansible_lint,
             }
             result = await asyncio.to_thread(runners[tool], target)
-
             if "error" in result:
                 return lint_error(tool, result["error"])
             if result["issue_count"] == 0:
                 return lint_no_issues(tool, target)
             return lint_complete(tool, result["issue_count"], target)
 
-        # ── run all linters ──────────────────────────────────────────────
         if action == "run_all":
             results = await asyncio.gather(
                 asyncio.to_thread(_run_ruff,         target),
                 asyncio.to_thread(_run_shellcheck,   target),
                 asyncio.to_thread(_run_ansible_lint, target),
             )
-            ruff_r, shell_r, ansible_r = results
-            rc = ruff_r["issue_count"]
-            sc = shell_r["issue_count"]
-            ac = ansible_r["issue_count"]
+            rc, sc, ac = results[0]["issue_count"], results[1]["issue_count"], results[2]["issue_count"]
             if rc == 0 and sc == 0 and ac == 0:
                 return lint_all_clean()
             return lint_all_summary(rc, sc, ac)
 
-        # ── trigger GitHub Actions ───────────────────────────────────────
         if action == "trigger":
             if not tool:
                 return "Please specify which linter to trigger: ruff, shellcheck, or ansible-lint."
             if not self._github_token:
                 return "GitHub token not configured. Set the GITHUB_TOKEN environment variable."
-
             workflow = _WORKFLOW_MAP[tool]
             try:
                 await _gh_post(
@@ -258,31 +216,26 @@ class LintAgent(BaseAgent):
             except Exception as exc:
                 return lint_trigger_failed(tool, str(exc))
 
-        # ── workflow status ──────────────────────────────────────────────
         if action == "status":
             if not self._github_token:
                 return "GitHub token not configured. Set the GITHUB_TOKEN environment variable."
             try:
                 data = await _gh_get(
-                    f"/repos/{self._repo_owner}/{self._repo_name}"
-                    f"/actions/runs?per_page=5",
+                    f"/repos/{self._repo_owner}/{self._repo_name}/actions/runs?per_page=5",
                     self._github_token,
                 )
                 runs = data.get("workflow_runs", [])
                 if not runs:
                     return "No recent workflow runs found."
-                run  = runs[0]
+                run = runs[0]
                 conclusion = (run.get("conclusion") or run.get("status", "in_progress")).replace("_", " ")
-                name = run.get("name", "workflow")
-                return f"Latest GitHub Actions run: {name} — {conclusion}."
+                return f"Latest GitHub Actions run: {run.get('name', 'workflow')} — {conclusion}."
             except Exception as exc:
                 return f"Could not fetch workflow status: {exc}"
 
-        # ── help ─────────────────────────────────────────────────────────
         if action == "help":
             return LINT_HELP
 
-        # ── unknown ──────────────────────────────────────────────────────
         return (
             "I didn't catch that lint command. "
             "Try: 'run ruff', 'shellcheck all scripts', "
