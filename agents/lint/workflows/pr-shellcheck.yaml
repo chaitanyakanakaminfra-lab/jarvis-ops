@@ -1,0 +1,179 @@
+name: pr-shellcheck
+
+on:
+  pull_request:
+    paths:
+      - "**.sh"
+      - "**/Makefile"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "File or directory to check (default: .)"
+        required: false
+        default: "."
+      severity:
+        description: "Minimum severity level (error|warning|info|style)"
+        required: false
+        default: "warning"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  shellcheck:
+    name: ShellCheck — Shell Script Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      SC_SEVERITY: ${{ inputs.severity || 'warning' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          shellcheck --version
+
+      # -------------------------------------------------------------------
+      # Collect shell scripts to check
+      # -------------------------------------------------------------------
+      - name: Find shell scripts
+        id: files
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+                      | grep '\.sh$' || true)
+            if [ -z "$CHANGED" ]; then
+              # No changed .sh files — still run but treat as pass
+              echo "files=" >> "$GITHUB_OUTPUT"
+              echo "count=0"  >> "$GITHUB_OUTPUT"
+            else
+              echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+              echo "count=$(echo "$CHANGED" | wc -l)" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            TARGET="${{ inputs.target || '.' }}"
+            if [ -f "$TARGET" ]; then
+              echo "files=$TARGET" >> "$GITHUB_OUTPUT"
+              echo "count=1"       >> "$GITHUB_OUTPUT"
+            else
+              FOUND=$(find "$TARGET" -name "*.sh" -type f | tr '\n' ' ')
+              COUNT=$(find "$TARGET" -name "*.sh" -type f | wc -l)
+              echo "files=$FOUND"  >> "$GITHUB_OUTPUT"
+              echo "count=$COUNT"  >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Run shellcheck
+        id: shellcheck
+        if: steps.files.outputs.count != '0' && steps.files.outputs.files != ''
+        run: |
+          set +e
+          shellcheck \
+            --format=gcc \
+            --severity="${SC_SEVERITY}" \
+            --shell=bash \
+            --external-sources \
+            ${{ steps.files.outputs.files }} \
+            2>&1 | tee /tmp/shellcheck.txt
+          SC_EXIT=$?
+          set -e
+
+          # Also produce JSON for the summary
+          shellcheck \
+            --format=json \
+            --severity="${SC_SEVERITY}" \
+            --shell=bash \
+            --external-sources \
+            ${{ steps.files.outputs.files }} \
+            > /tmp/shellcheck.json 2>/dev/null || true
+
+          echo "exit_code=$SC_EXIT" >> "$GITHUB_OUTPUT"
+
+          # Count by severity
+          ERRORS=$(  jq '[.[] | select(.level=="error")]   | length' /tmp/shellcheck.json 2>/dev/null || echo 0)
+          WARNINGS=$(jq '[.[] | select(.level=="warning")] | length' /tmp/shellcheck.json 2>/dev/null || echo 0)
+          INFOS=$(   jq '[.[] | select(.level=="info")]    | length' /tmp/shellcheck.json 2>/dev/null || echo 0)
+          echo "errors=$ERRORS"     >> "$GITHUB_OUTPUT"
+          echo "warnings=$WARNINGS" >> "$GITHUB_OUTPUT"
+          echo "infos=$INFOS"       >> "$GITHUB_OUTPUT"
+
+      - name: Skip — no shell scripts changed
+        if: steps.files.outputs.count == '0' || steps.files.outputs.files == ''
+        run: |
+          echo "No shell scripts to check. Skipping shellcheck."
+          echo "exit_code=0" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------
+      # Annotate PR
+      # -------------------------------------------------------------------
+      - name: Post PR comment
+        if: github.event_name == 'pull_request' && steps.shellcheck.outputs.exit_code != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output  = fs.readFileSync('/tmp/shellcheck.txt', 'utf8').trim();
+            const exitCode = '${{ steps.shellcheck.outputs.exit_code }}';
+            const errors   = '${{ steps.shellcheck.outputs.errors }}'   || '0';
+            const warnings = '${{ steps.shellcheck.outputs.warnings }}' || '0';
+            const infos    = '${{ steps.shellcheck.outputs.infos }}'    || '0';
+
+            const statusIcon = exitCode === '0' ? '✅' : '❌';
+            const statusText = exitCode === '0' ? 'All checks passed' : 'Issues found';
+
+            const body = [
+              '## 🐚 ShellCheck Report',
+              '',
+              `${statusIcon} **${statusText}**`,
+              '',
+              `| Severity | Count |`,
+              `|----------|-------|`,
+              `| Errors   | ${errors} |`,
+              `| Warnings | ${warnings} |`,
+              `| Info     | ${infos} |`,
+              '',
+              output ? `<details><summary>Full shellcheck output</summary>\n\n\`\`\`\n${output}\n\`\`\`\n</details>` : '',
+              '',
+              '_Triggered by Jarvis Lint Agent — Day 9_',
+            ].filter(Boolean).join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('ShellCheck Report')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      # -------------------------------------------------------------------
+      # Fail if errors found (warnings are reported but non-blocking)
+      # -------------------------------------------------------------------
+      - name: Enforce no errors
+        if: steps.shellcheck.outputs.exit_code != '0'
+        run: |
+          echo "::error::ShellCheck found issues at severity level '${SC_SEVERITY}'. Fix them before merging."
+          exit 1
