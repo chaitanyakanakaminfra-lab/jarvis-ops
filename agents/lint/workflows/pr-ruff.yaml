@@ -1,0 +1,141 @@
+name: pr-ruff
+
+on:
+  pull_request:
+    paths:
+      - "**.py"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "File or directory to lint (default: .)"
+        required: false
+        default: "."
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ruff:
+    name: Ruff — Python Lint & Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # full history so ruff can diff
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install ruff
+        run: pip install ruff==0.4.4
+
+      # -------------------------------------------------------------------
+      # On PRs: lint only changed .py files; on manual dispatch: lint target
+      # -------------------------------------------------------------------
+      - name: Determine lint target
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+                      | grep '\.py$' || true)
+            if [ -z "$CHANGED" ]; then
+              echo "target=." >> "$GITHUB_OUTPUT"
+            else
+              # pass individual files as space-separated list
+              echo "target=$CHANGED" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "target=${{ inputs.target || '.' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run ruff check
+        id: ruff_check
+        run: |
+          set +e
+          ruff check --output-format=github ${{ steps.target.outputs.target }} \
+            2>&1 | tee /tmp/ruff-check.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Run ruff format check
+        id: ruff_format
+        run: |
+          set +e
+          ruff format --check ${{ steps.target.outputs.target }} \
+            2>&1 | tee /tmp/ruff-format.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      # -------------------------------------------------------------------
+      # Post a consolidated comment on the PR
+      # -------------------------------------------------------------------
+      - name: Post PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const checkOut  = fs.readFileSync('/tmp/ruff-check.txt',  'utf8').trim();
+            const formatOut = fs.readFileSync('/tmp/ruff-format.txt', 'utf8').trim();
+            const checkCode  = '${{ steps.ruff_check.outputs.exit_code }}';
+            const formatCode = '${{ steps.ruff_format.outputs.exit_code }}';
+
+            const checkStatus  = checkCode  === '0' ? '✅ No issues' : '❌ Issues found';
+            const formatStatus = formatCode === '0' ? '✅ Formatted correctly' : '❌ Format violations';
+
+            const body = [
+              '## 🐍 Ruff Lint Report',
+              '',
+              `| Check | Status |`,
+              `|-------|--------|`,
+              `| \`ruff check\` | ${checkStatus} |`,
+              `| \`ruff format\` | ${formatStatus} |`,
+              '',
+              checkOut  ? `<details><summary>ruff check output</summary>\n\n\`\`\`\n${checkOut}\n\`\`\`\n</details>` : '',
+              formatOut ? `<details><summary>ruff format output</summary>\n\n\`\`\`\n${formatOut}\n\`\`\`\n</details>` : '',
+              '',
+              '_Triggered by Jarvis Lint Agent — Day 9_',
+            ].filter(Boolean).join('\n');
+
+            // Find existing bot comment and update, or create new
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Ruff Lint Report')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      # -------------------------------------------------------------------
+      # Fail the job if either check found violations
+      # -------------------------------------------------------------------
+      - name: Enforce clean lint
+        if: >
+          steps.ruff_check.outputs.exit_code != '0' ||
+          steps.ruff_format.outputs.exit_code != '0'
+        run: |
+          echo "::error::Ruff found violations. Fix them before merging."
+          exit 1
