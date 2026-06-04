@@ -1,1 +1,22 @@
-
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jarvis
+  namespace: argocd
+  labels:
+    app: jarvis
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chaitanyakanakaminfra-lab/jarvis-ops
+    targetRevision: main
+    path: deploy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jarvis
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
