@@ -1,11 +1,10 @@
 import importlib
-from functools import lru_cache
 from pathlib import Path
 
 import yaml
 import structlog
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain.memory import ConversationBufferWindowMemory
+from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
+from langchain_classic.memory import ConversationBufferWindowMemory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
