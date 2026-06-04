@@ -3,11 +3,11 @@ from pathlib import Path
 
 import yaml
 import structlog
+from langchain_groq import ChatGroq
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_classic.memory import ConversationBufferWindowMemory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import StructuredTool
-from langchain_openai import ChatOpenAI
 
 from config.settings import get_settings
 
@@ -43,9 +43,9 @@ class JarvisBrain:
             MessagesPlaceholder("agent_scratchpad"),
         ])
 
-        llm = ChatOpenAI(
-            api_key=self.settings.openai_api_key,
-            model=self.settings.openai_model,
+        llm = ChatGroq(
+            api_key=self.settings.groq_api_key,
+            model=self.settings.groq_model,
             temperature=0,
         )
 
@@ -62,7 +62,7 @@ class JarvisBrain:
 
     async def process(self, user_input: str) -> str:
         if not self._executor:
-            raise RuntimeError("Brain not initialised — call brain.initialise() first")
+            raise RuntimeError("Brain not initialised")
         logger.info("brain.processing", input=user_input)
         try:
             result = await self._executor.ainvoke({
