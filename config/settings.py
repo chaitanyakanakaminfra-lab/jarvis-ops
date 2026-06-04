@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     jarvis_voice_enabled: bool = Field(default=True)
     jarvis_wake_word: str = Field(default="jarvis")
 
+    # Gemini
+    gemini_api_key: str = Field(default="")
+
     # Groq
     groq_api_key: str = Field(default="")
     groq_model: str = Field(default="llama-3.3-70b-versatile")
