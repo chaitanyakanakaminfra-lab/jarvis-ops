@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis-ops"
@@ -67,3 +67,7 @@ testpaths = ["tests"]
 python_version = "3.11"
 strict = false
 ignore_missing_imports = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["orchestrator*", "agents*", "voice*", "api*", "memory*", "config*", "cli*"]
