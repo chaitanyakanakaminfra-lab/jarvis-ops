@@ -1,20 +1,56 @@
+cat > ~/jarvis-ops/ui/src/App.tsx << 'ENDOFFILE'
 import { useState, useEffect, useRef } from "react";
 
 interface AgentStatus {
   agent: string;
   status: string;
   state: "idle" | "checking" | "done";
+  category: string;
 }
 
 const AGENT_ICONS: Record<string, string> = {
-  "CI/CD Pipeline": "⚡",
-  "Infrastructure": "☁️",
-  "Cloud Costs": "💰",
-  "Security": "🔒",
-  "Compliance": "📋",
-  "Observability": "👁️",
-  "Incidents": "🚨",
-  "Weekly Report": "📊",
+  "CI/CD Pipeline":       "⚡",
+  "Lint & Code Quality":  "🔍",
+  "Docker & Image":       "🐳",
+  "Release & Versioning": "🏷️",
+  "Infra Provisioning":   "🏗️",
+  "Kubernetes Ops":       "☸️",
+  "Cloud Config":         "☁️",
+  "DR & Backup":          "💾",
+  "Cost Optimization":    "💰",
+  "Auto-Scaling":         "📈",
+  "Security Scanning":    "🔒",
+  "Compliance":           "📋",
+  "Observability":        "👁️",
+  "Incident Response":    "🚨",
+  "Reporting":            "📊",
+};
+
+const ALL_AGENTS = [
+  { agent: "CI/CD Pipeline",       cmd: "run the pipeline",          category: "CI/CD" },
+  { agent: "Lint & Code Quality",  cmd: "run ruff",                  category: "CI/CD" },
+  { agent: "Docker & Image",       cmd: "mirror the images",         category: "CI/CD" },
+  { agent: "Release & Versioning", cmd: "what is the latest version",category: "CI/CD" },
+  { agent: "Infra Provisioning",   cmd: "plan the infra",            category: "Infrastructure" },
+  { agent: "Kubernetes Ops",       cmd: "check the cluster",         category: "Infrastructure" },
+  { agent: "Cloud Config",         cmd: "audit cloud config",        category: "Infrastructure" },
+  { agent: "DR & Backup",          cmd: "run a backup",              category: "Infrastructure" },
+  { agent: "Cost Optimization",    cmd: "how are cloud costs",       category: "Cost" },
+  { agent: "Auto-Scaling",         cmd: "scaling status",            category: "Cost" },
+  { agent: "Security Scanning",    cmd: "scan for vulnerabilities",  category: "Security" },
+  { agent: "Compliance",           cmd: "run compliance check",      category: "Security" },
+  { agent: "Observability",        cmd: "hows the system",           category: "Observability" },
+  { agent: "Incident Response",    cmd: "any active incidents",      category: "Observability" },
+  { agent: "Reporting",            cmd: "weekly summary",            category: "Intelligence" },
+];
+
+const CATEGORY_COLORS: Record<string, string> = {
+  "CI/CD":          "#22d3ee",
+  "Infrastructure": "#818cf8",
+  "Cost":           "#fb923c",
+  "Security":       "#f87171",
+  "Observability":  "#4ade80",
+  "Intelligence":   "#a78bfa",
 };
 
 function VoiceOrb({ state }: { state: "idle"|"listening"|"speaking"|"thinking" }) {
@@ -26,10 +62,10 @@ function VoiceOrb({ state }: { state: "idle"|"listening"|"speaking"|"thinking" }
   };
   const [c1, c2] = colors[state];
   return (
-    <div style={{ position: "relative", width: 160, height: 160, margin: "0 auto" }}>
+    <div style={{ position: "relative", width: 140, height: 140, margin: "0 auto" }}>
       {state !== "idle" && (
         <div style={{
-          position: "absolute", inset: -20, borderRadius: "50%",
+          position: "absolute", inset: -16, borderRadius: "50%",
           border: `2px solid ${c1}`, opacity: 0.4,
           animation: "ping 1.5s cubic-bezier(0,0,0.2,1) infinite",
         }} />
@@ -39,59 +75,61 @@ function VoiceOrb({ state }: { state: "idle"|"listening"|"speaking"|"thinking" }
         background: `radial-gradient(circle at 35% 35%, ${c2}, ${c1})`,
         boxShadow: `0 0 40px ${c1}88, 0 0 80px ${c1}44`,
         display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 48, transition: "all 0.3s ease",
+        fontSize: 44, transition: "all 0.3s ease",
       }}>🤖</div>
       <div style={{
-        textAlign: "center", marginTop: 12, fontSize: 12, color: c2,
+        textAlign: "center", marginTop: 10, fontSize: 11, color: c2,
         fontFamily: "monospace", letterSpacing: "0.2em", textTransform: "uppercase",
       }}>
-        {state === "idle" && "STANDBY"}
+        {state === "idle"      && "STANDBY"}
         {state === "listening" && "LISTENING"}
-        {state === "speaking" && "SPEAKING"}
-        {state === "thinking" && "PROCESSING"}
+        {state === "speaking"  && "SPEAKING"}
+        {state === "thinking"  && "PROCESSING"}
       </div>
     </div>
   );
 }
 
 function AgentCard({ agent }: { agent: AgentStatus }) {
+  const catColor = CATEGORY_COLORS[agent.category] || "#6366f1";
   const stateColors = {
     idle:     { border: "#1e293b", text: "#475569", bg: "transparent" },
-    checking: { border: "#f59e0b", text: "#fbbf24", bg: "#7c3aed11" },
-    done:     { border: "#6366f1", text: "#a5b4fc", bg: "#6366f111" },
+    checking: { border: "#f59e0b", text: "#fbbf24", bg: "#f59e0b08" },
+    done:     { border: catColor + "66", text: catColor, bg: catColor + "08" },
   };
   const { border, text, bg } = stateColors[agent.state];
   return (
     <div style={{
-      border: `1px solid ${border}`, borderRadius: 8,
-      padding: "10px 14px", background: bg,
-      transition: "all 0.3s ease", marginBottom: 6,
+      border: `1px solid ${border}`, borderRadius: 6,
+      padding: "8px 10px", background: bg,
+      transition: "all 0.3s ease", marginBottom: 4,
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 18 }}>{AGENT_ICONS[agent.agent] || "🤖"}</span>
-        <div style={{ flex: 1 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 14, flexShrink: 0 }}>{AGENT_ICONS[agent.agent] || "🤖"}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 12, fontWeight: 700, color: text,
-            fontFamily: "monospace", letterSpacing: "0.05em",
+            fontSize: 10, fontWeight: 700, color: text,
+            fontFamily: "monospace", letterSpacing: "0.04em",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           }}>
             {agent.agent.toUpperCase()}
           </div>
           {agent.state === "checking" && (
-            <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 2 }}>⟳ Checking...</div>
+            <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 1 }}>⟳ Checking...</div>
           )}
           {agent.state === "done" && agent.status && (
-            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
-              {agent.status.length > 80 ? agent.status.slice(0, 80) + "..." : agent.status}
+            <div style={{ fontSize: 10, color: "#64748b", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {agent.status.length > 60 ? agent.status.slice(0, 60) + "..." : agent.status}
             </div>
           )}
         </div>
         <div style={{
-          fontSize: 10, padding: "2px 6px", borderRadius: 3,
-          background: agent.state === "done" ? "#6366f122" : agent.state === "checking" ? "#f59e0b22" : "#1e293b",
-          color: agent.state === "done" ? "#6366f1" : agent.state === "checking" ? "#f59e0b" : "#334155",
+          fontSize: 9, padding: "2px 5px", borderRadius: 3, flexShrink: 0,
+          background: agent.state === "done" ? catColor + "22" : agent.state === "checking" ? "#f59e0b22" : "#1e293b",
+          color: agent.state === "done" ? catColor : agent.state === "checking" ? "#f59e0b" : "#334155",
           fontFamily: "monospace",
         }}>
-          {agent.state === "done" ? "DONE" : agent.state === "checking" ? "ACTIVE" : "IDLE"}
+          {agent.state === "done" ? "✓" : agent.state === "checking" ? "..." : "—"}
         </div>
       </div>
     </div>
@@ -100,20 +138,13 @@ function AgentCard({ agent }: { agent: AgentStatus }) {
 
 export default function App() {
   const JARVIS_API = `http://${window.location.hostname}:8000`;
-  const [orbState, setOrbState] = useState<"idle"|"listening"|"speaking"|"thinking">("idle");
-  const [agents, setAgents] = useState<AgentStatus[]>([
-    { agent: "CI/CD Pipeline", status: "", state: "idle" },
-    { agent: "Infrastructure",  status: "", state: "idle" },
-    { agent: "Cloud Costs",     status: "", state: "idle" },
-    { agent: "Security",        status: "", state: "idle" },
-    { agent: "Compliance",      status: "", state: "idle" },
-    { agent: "Observability",   status: "", state: "idle" },
-    { agent: "Incidents",       status: "", state: "idle" },
-    { agent: "Weekly Report",   status: "", state: "idle" },
-  ]);
+  const [orbState,   setOrbState]   = useState<"idle"|"listening"|"speaking"|"thinking">("idle");
+  const [agents,     setAgents]     = useState<AgentStatus[]>(
+    ALL_AGENTS.map(a => ({ ...a, status: "", state: "idle" as const }))
+  );
   const [transcript, setTranscript] = useState<string[]>([]);
   const [isBriefing, setIsBriefing] = useState(false);
-  const [inputCmd, setInputCmd]     = useState("");
+  const [inputCmd,   setInputCmd]   = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -123,7 +154,7 @@ export default function App() {
 
   function addTranscript(role: string, text: string) {
     const time = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-    setTranscript(prev => [...prev.slice(-50), `${time} [${role.toUpperCase()}]: ${text}`]);
+    setTranscript(prev => [...prev.slice(-100), `${time} [${role.toUpperCase()}]: ${text}`]);
   }
 
   function updateAgent(name: string, state: AgentStatus["state"], status: string) {
@@ -136,24 +167,13 @@ export default function App() {
     addTranscript("you", "Jarvis, wake up");
     setAgents(prev => prev.map(a => ({ ...a, state: "idle", status: "" })));
 
-    const commands = [
-      { agent: "CI/CD Pipeline", cmd: "pipeline status" },
-      { agent: "Infrastructure",  cmd: "check the cluster" },
-      { agent: "Cloud Costs",     cmd: "how are cloud costs" },
-      { agent: "Security",        cmd: "scan for vulnerabilities" },
-      { agent: "Compliance",      cmd: "run compliance check" },
-      { agent: "Observability",   cmd: "hows the system" },
-      { agent: "Incidents",       cmd: "any active incidents" },
-      { agent: "Weekly Report",   cmd: "weekly summary" },
-    ];
-
     const hour = new Date().getHours();
     const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-    addTranscript("jarvis", `${greeting} Chaitanya. All systems online. Running morning briefing...`);
+    addTranscript("jarvis", `${greeting} Chaitanya. All 15 systems online. Running full briefing...`);
     setOrbState("speaking");
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 800));
 
-    for (const { agent, cmd } of commands) {
+    for (const { agent, cmd } of ALL_AGENTS) {
       setOrbState("thinking");
       updateAgent(agent, "checking", "");
       addTranscript("jarvis", `Checking ${agent}...`);
@@ -168,7 +188,7 @@ export default function App() {
         updateAgent(agent, "done", status);
         setOrbState("speaking");
         addTranscript("jarvis", `${agent}: ${status}`);
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, 500));
       } catch {
         updateAgent(agent, "done", "Unavailable");
         addTranscript("system", `${agent}: Could not reach agent`);
@@ -176,7 +196,7 @@ export default function App() {
     }
 
     setOrbState("speaking");
-    addTranscript("jarvis", "Morning briefing complete. All systems checked. Ready for your commands, Chaitanya.");
+    addTranscript("jarvis", "Full briefing complete. All 15 agents checked. Ready for your commands, Chaitanya.");
     await new Promise(r => setTimeout(r, 2000));
     setOrbState("idle");
     setIsBriefing(false);
@@ -204,85 +224,95 @@ export default function App() {
 
   const doneCount = agents.filter(a => a.state === "done").length;
 
+  // Group agents by category
+  const grouped = ALL_AGENTS.reduce((acc, a) => {
+    if (!acc[a.category]) acc[a.category] = [];
+    acc[a.category].push(a.agent);
+    return acc;
+  }, {} as Record<string, string[]>);
+
   return (
     <div style={{
       background: "#050510", minHeight: "100vh", color: "#e2e0ff",
-      fontFamily: "'JetBrains Mono', monospace", padding: 20,
+      fontFamily: "'JetBrains Mono', monospace", padding: "16px 20px",
     }}>
       <style>{`
         @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         * { box-sizing: border-box; }
         body { margin: 0; background: #050510; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: #0f0f1a; }
+        ::-webkit-scrollbar { width: 3px; }
         ::-webkit-scrollbar-thumb { background: #6366f1; border-radius: 2px; }
       `}</style>
 
       {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        marginBottom: 24, borderBottom: "1px solid #1e293b", paddingBottom: 16,
+        marginBottom: 16, borderBottom: "1px solid #1e293b", paddingBottom: 12,
       }}>
         <div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "#6366f1", letterSpacing: "0.4em" }}>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "#6366f1", letterSpacing: "0.4em" }}>
             J.A.R.V.I.S
           </div>
-          <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.15em", marginTop: 2 }}>
+          <div style={{ fontSize: 9, color: "#334155", letterSpacing: "0.12em", marginTop: 2 }}>
             JUST A RATHER VERY INTELLIGENT SYSTEM · 15 AGENTS · AWS EKS
           </div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 20, color: "#6366f1", fontWeight: 700 }}>
-            {doneCount}/{agents.length}
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 22, color: "#6366f1", fontWeight: 700 }}>{doneCount}</div>
+            <div style={{ fontSize: 9, color: "#334155" }}>/ 15 CHECKED</div>
           </div>
-          <div style={{ fontSize: 10, color: "#475569", letterSpacing: "0.1em" }}>
-            AGENTS CHECKED
-          </div>
-          <div style={{ fontSize: 11, color: "#4ade80", marginTop: 6, animation: "pulse 2s infinite" }}>
-            ● ONLINE
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: "#4ade80", animation: "pulse 2s infinite" }}>● ONLINE</div>
+            <div style={{ fontSize: 9, color: "#334155", marginTop: 2 }}>
+              {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 1fr", gap: 20 }}>
+      {/* Main 4-column grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 1fr 280px", gap: 16 }}>
 
-        {/* Left — Orb + controls */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+        {/* Col 1 — Orb + controls */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
           <VoiceOrb state={orbState} />
 
           <button onClick={runBriefing} disabled={isBriefing} style={{
             background: isBriefing ? "#1e293b" : "linear-gradient(135deg, #6366f1, #4f46e5)",
-            border: "none", borderRadius: 8, padding: "12px 16px",
-            color: isBriefing ? "#475569" : "#fff", fontSize: 12,
+            border: "none", borderRadius: 8, padding: "10px 12px",
+            color: isBriefing ? "#475569" : "#fff", fontSize: 11,
             fontFamily: "monospace", fontWeight: 700,
             cursor: isBriefing ? "not-allowed" : "pointer",
             letterSpacing: "0.08em", width: "100%",
           }}>
-            {isBriefing ? "⟳ RUNNING..." : "🌅 JARVIS WAKE UP"}
+            {isBriefing ? "⟳ BRIEFING..." : "🌅 JARVIS WAKE UP"}
           </button>
 
-          <div style={{ width: "100%", borderTop: "1px solid #1e293b", paddingTop: 12 }}>
-            <div style={{ fontSize: 10, color: "#334155", marginBottom: 8, letterSpacing: "0.1em" }}>
+          <div style={{ width: "100%", borderTop: "1px solid #1e293b", paddingTop: 10 }}>
+            <div style={{ fontSize: 9, color: "#334155", marginBottom: 6, letterSpacing: "0.1em" }}>
               QUICK COMMANDS
             </div>
             {[
               ["💰", "how are cloud costs"],
-              ["☁️", "check the cluster"],
+              ["☸️", "check the cluster"],
               ["🔒", "scan for vulnerabilities"],
               ["📊", "weekly summary"],
               ["🚨", "we have an incident"],
+              ["🏗️", "plan the infra"],
+              ["🐳", "mirror the images"],
+              ["🏷️", "cut a release"],
             ].map(([icon, cmd]) => (
               <button key={cmd} onClick={() => sendCommand(cmd)} style={{
                 display: "block", width: "100%", background: "transparent",
-                border: "1px solid #1e293b", borderRadius: 6,
-                padding: "7px 10px", color: "#64748b", fontSize: 10,
+                border: "1px solid #1e293b", borderRadius: 4,
+                padding: "5px 8px", color: "#475569", fontSize: 9,
                 fontFamily: "monospace", cursor: "pointer",
-                textAlign: "left", marginBottom: 4,
+                textAlign: "left", marginBottom: 3,
               }}
               onMouseEnter={e => { e.currentTarget.style.borderColor="#6366f1"; e.currentTarget.style.color="#a5b4fc"; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor="#1e293b"; e.currentTarget.style.color="#64748b"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor="#1e293b"; e.currentTarget.style.color="#475569"; }}
               >
                 {icon} {cmd}
               </button>
@@ -290,70 +320,107 @@ export default function App() {
           </div>
         </div>
 
-        {/* Middle — Agent cards */}
+        {/* Col 2 — CI/CD + Infra agents */}
         <div>
-          <div style={{ fontSize: 10, color: "#475569", marginBottom: 8, letterSpacing: "0.1em" }}>
-            AGENT STATUS
-          </div>
-          <div style={{ height: 4, background: "#1e293b", borderRadius: 2, marginBottom: 14 }}>
-            <div style={{
-              height: "100%",
-              width: `${(doneCount / agents.length) * 100}%`,
-              background: "linear-gradient(90deg, #6366f1, #a78bfa)",
-              borderRadius: 2, transition: "width 0.5s ease",
-            }} />
-          </div>
-          {agents.map(agent => <AgentCard key={agent.agent} agent={agent} />)}
+          {["CI/CD", "Infrastructure"].map(cat => (
+            <div key={cat} style={{ marginBottom: 12 }}>
+              <div style={{
+                fontSize: 9, fontWeight: 700, color: CATEGORY_COLORS[cat],
+                letterSpacing: "0.1em", marginBottom: 6,
+                borderBottom: `1px solid ${CATEGORY_COLORS[cat]}22`,
+                paddingBottom: 3,
+              }}>
+                {cat.toUpperCase()}
+              </div>
+              {agents
+                .filter(a => a.category === cat)
+                .map(a => <AgentCard key={a.agent} agent={a} />)
+              }
+            </div>
+          ))}
         </div>
 
-        {/* Right — Transcript */}
+        {/* Col 3 — Cost + Security + Observability + Intelligence */}
+        <div>
+          {["Cost", "Security", "Observability", "Intelligence"].map(cat => (
+            <div key={cat} style={{ marginBottom: 12 }}>
+              <div style={{
+                fontSize: 9, fontWeight: 700, color: CATEGORY_COLORS[cat],
+                letterSpacing: "0.1em", marginBottom: 6,
+                borderBottom: `1px solid ${CATEGORY_COLORS[cat]}22`,
+                paddingBottom: 3,
+              }}>
+                {cat.toUpperCase()}
+              </div>
+              {agents
+                .filter(a => a.category === cat)
+                .map(a => <AgentCard key={a.agent} agent={a} />)
+              }
+            </div>
+          ))}
+        </div>
+
+        {/* Col 4 — Live transcript */}
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ fontSize: 10, color: "#475569", marginBottom: 8, letterSpacing: "0.1em" }}>
+          <div style={{ fontSize: 9, color: "#334155", marginBottom: 6, letterSpacing: "0.1em" }}>
             LIVE TRANSCRIPT
           </div>
+
+          {/* Progress bar */}
+          <div style={{ height: 2, background: "#1e293b", borderRadius: 1, marginBottom: 8 }}>
+            <div style={{
+              height: "100%",
+              width: `${(doneCount / 15) * 100}%`,
+              background: "linear-gradient(90deg, #6366f1, #a78bfa)",
+              borderRadius: 1, transition: "width 0.5s ease",
+            }} />
+          </div>
+
           <div ref={transcriptRef} style={{
-            flex: 1, height: 420, overflowY: "auto",
+            flex: 1, height: 460, overflowY: "auto",
             background: "#080814", border: "1px solid #1e293b",
-            borderRadius: 8, padding: 12, marginBottom: 10,
+            borderRadius: 8, padding: 10, marginBottom: 8,
           }}>
             {transcript.length === 0 && (
-              <div style={{ color: "#334155", fontSize: 11, fontStyle: "italic" }}>
-                Click "JARVIS WAKE UP" to start morning briefing...
+              <div style={{ color: "#1e293b", fontSize: 10, fontStyle: "italic" }}>
+                Click "JARVIS WAKE UP" to start full briefing of all 15 agents...
               </div>
             )}
             {transcript.map((line, i) => (
               <div key={i} style={{
-                fontSize: 11, marginBottom: 5, lineHeight: 1.5,
+                fontSize: 10, marginBottom: 4, lineHeight: 1.4,
                 color: line.includes("[JARVIS]") ? "#a5b4fc"
                      : line.includes("[YOU]")    ? "#4ade80"
-                     : "#475569",
+                     : "#334155",
               }}>
                 {line}
               </div>
             ))}
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+
+          <div style={{ display: "flex", gap: 6 }}>
             <input
               value={inputCmd}
               onChange={e => setInputCmd(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && inputCmd.trim()) { sendCommand(inputCmd); setInputCmd(""); }}}
-              placeholder="Type a command to Jarvis..."
+              placeholder="Ask Jarvis anything..."
               style={{
-                flex: 1, background: "#0f0f1a", border: "1px solid #1e293b",
-                borderRadius: 6, padding: "8px 12px", color: "#e2e0ff",
-                fontSize: 11, fontFamily: "monospace", outline: "none",
+                flex: 1, background: "#080814", border: "1px solid #1e293b",
+                borderRadius: 6, padding: "7px 10px", color: "#e2e0ff",
+                fontSize: 10, fontFamily: "monospace", outline: "none",
               }}
             />
             <button onClick={() => { if (inputCmd.trim()) { sendCommand(inputCmd); setInputCmd(""); }}} style={{
               background: "#6366f1", border: "none", borderRadius: 6,
-              padding: "8px 14px", color: "#fff", fontSize: 11,
+              padding: "7px 12px", color: "#fff", fontSize: 10,
               fontFamily: "monospace", cursor: "pointer", fontWeight: 700,
-            }}>
-              ▶
-            </button>
+            }}>▶</button>
           </div>
         </div>
       </div>
     </div>
   );
 }
+ENDOFFILE
+
+echo "✅ App.tsx updated with all 15 agents"
