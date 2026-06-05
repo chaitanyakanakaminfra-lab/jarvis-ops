@@ -3,10 +3,10 @@ agents:
   - id: cicd_pipeline
     name: CI/CD Pipeline Agent
     module: agents.cicd.agent
-    class: CICDAgent
+    class: CICDPipelineAgent
     category: cicd
     voice_enabled: true
-    voice_phrases: ["run the pipeline", "start the build", "trigger ci", "deploy"]
+    voice_phrases: ["pipeline status", "build status", "ci status", "run pipeline", "trigger ci", "deploy", "iron man", "codebuild", "github actions"]
     triggers:
       - type: github_pr
         events: [opened, synchronize]
