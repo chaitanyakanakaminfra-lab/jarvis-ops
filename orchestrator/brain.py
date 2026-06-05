@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 import structlog
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_deepseek import ChatDeepSeek
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_classic.memory import ConversationBufferWindowMemory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -44,9 +44,9 @@ class JarvisBrain:
         ])
 
         import os
-        os.environ["GOOGLE_API_KEY"] = self.settings.gemini_api_key
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+        os.environ["DEEPSEEK_API_KEY"] = self.settings.deepseek_api_key
+        llm = ChatDeepSeek(
+            model="deepseek-chat",
             temperature=0,
         )
 
