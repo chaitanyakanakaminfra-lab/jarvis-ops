@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = Field(default="")
 
+    # DeepSeek
+    deepseek_api_key: str = Field(default="")
+
     # Groq
     groq_api_key: str = Field(default="")
     groq_model: str = Field(default="llama-3.3-70b-versatile")
