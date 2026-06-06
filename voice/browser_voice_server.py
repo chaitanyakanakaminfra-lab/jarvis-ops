@@ -35,34 +35,62 @@ def transcribe(audio_bytes: bytes) -> str:
         return ""
 
 
-def get_tts_audio(text: str) -> bytes:
-    api_key  = os.getenv("ELEVENLABS_API_KEY", "")
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")
-    if not api_key or api_key in ("dummy", "..."):
+# Agent voice map — each Marvel agent has unique voice
+AGENT_VOICES = {
+    "iron man":        "aura-zeus-en",
+    "vision":          "aura-arcas-en",
+    "war machine":     "aura-orion-en",
+    "nick fury":       "aura-orion-en",
+    "thor":            "aura-zeus-en",
+    "cap america":     "aura-zeus-en",
+    "captain america": "aura-zeus-en",
+    "black widow":     "aura-athena-en",
+    "hulk":            "aura-orion-en",
+    "ant-man":         "aura-angus-en",
+    "ant man":         "aura-angus-en",
+    "giant-man":       "aura-arcas-en",
+    "giant man":       "aura-arcas-en",
+    "black panther":   "aura-zeus-en",
+    "cap marvel":      "aura-asteria-en",
+    "captain marvel":  "aura-asteria-en",
+    "hawkeye":         "aura-arcas-en",
+    "spider-man":      "aura-arcas-en",
+    "spider man":      "aura-arcas-en",
+    "doctor strange":  "aura-zeus-en",
+    "dr strange":      "aura-zeus-en",
+    "jarvis":          "aura-orion-en",
+}
+
+def get_tts_audio(text: str, voice: str = "aura-orion-en") -> bytes:
+    """Deepgram TTS — unique voice per agent"""
+    api_key = os.getenv("DEEPGRAM_API_KEY", "")
+    if not api_key:
         return b""
     try:
         response = requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "text": text,
-                "model_id": "eleven_turbo_v2",
-                "voice_settings": {"stability": 0.5, "similarity_boost": 0.8},
+            f"https://api.deepgram.com/v1/speak?model={voice}",
+            headers={
+                "Authorization": f"Token {api_key}",
+                "Content-Type": "application/json",
             },
+            json={"text": text},
             timeout=30,
         )
         if response.status_code == 200:
+            logger.info("deepgram_tts_ok", voice=voice, bytes=len(response.content))
             return response.content
+        logger.error("deepgram_tts_error", status=response.status_code, voice=voice)
         return b""
     except Exception as e:
         logger.error("tts_error", error=str(e))
         return b""
 
 
-async def speak(websocket, text: str):
+async def speak(websocket, text: str, agent_name: str = "jarvis"):
     """Send TTS audio to client."""
     logger.info("speaking", text=text[:50])
-    audio_data = get_tts_audio(text)
+    voice = AGENT_VOICES.get(agent_name.lower(), "aura-orion-en")
+    audio_data = get_tts_audio(text, voice=voice)
     if audio_data:
         await websocket.send(json.dumps({
             "type": "audio",
@@ -127,6 +155,57 @@ async def handle_client(websocket):
                     continue
 
                 # Wake up all agents
+                # Single agent detection
+                marvel_map = {
+                    "iron man":      "cicd",
+                    "vision":        "lint",
+                    "war machine":   "docker",
+                    "nick fury":     "release",
+                    "thor":          "infra",
+                    "store":         "infra",
+                    "sir":           "infra",
+                    "four":          "infra",
+                    "door":          "infra",
+                    "captain america": "kubernetes",
+                    "cap america":   "kubernetes",
+                    "black widow":   "cloud",
+                    "hulk":          "backup",
+                    "ant man":       "cost",
+                    "ant-man":       "cost",
+                    "antman":        "cost",
+                    "giant man":     "scaling",
+                    "giant-man":     "scaling",
+                    "black panther": "security",
+                    "captain marvel":"compliance",
+                    "cap marvel":    "compliance",
+                    "hawkeye":       "observe",
+                    "hawk eye":      "observe",
+                    "hockey":        "observe",
+                    "hot guy":       "observe",
+                    "spider man":    "incident",
+                    "spider-man":    "incident",
+                    "spiderman":     "incident",
+                    "doctor strange":"reporting",
+                    "dr strange":    "reporting",
+                }
+
+                activated_agent = None
+                for name, agent_id in marvel_map.items():
+                    if name in text_lower:
+                        activated_agent = {"id": agent_id, "marvel": name.title()}
+                        break
+
+                if activated_agent:
+                    await websocket.send(json.dumps({
+                        "type": "single_agent_trigger",
+                        "agent": activated_agent["id"],
+                        "marvel": activated_agent["marvel"],
+                    }))
+                    response = f"Waking up {activated_agent['marvel']} now."
+                    await speak(websocket, response, agent_name=activated_agent['marvel'])
+                    await websocket.send(json.dumps({"type": "status", "message": "idle"}))
+                    continue
+
                 if any(w in text_lower for w in ["wake up all", "wakeup all", "all agents", "wake all", "start all", "briefing", "morning briefing", "pick up all"]):
                     jarvis_awake = True
                     response = "Waking up all agents now. Stand by."
@@ -162,7 +241,18 @@ async def handle_client(websocket):
                 text = data.get("text", "")
                 if text:
                     logger.info("tts_request", text=text[:50])
-                    await speak(websocket, text)
+                    agent_name = "jarvis"
+                    text_lower_tts = text.lower()
+                    for name in AGENT_VOICES.keys():
+                        if name in text_lower_tts:
+                            agent_name = name
+                            break
+                    voice = AGENT_VOICES.get(agent_name, "aura-orion-en")
+                    logger.info("speaking", text=text[:50], voice=voice)
+                    audio_data = get_tts_audio(text, voice=voice)
+                    if audio_data:
+                        b64 = base64.b64encode(audio_data).decode("utf-8")
+                        await websocket.send(json.dumps({"type": "audio", "audio": b64}))
 
             # ── Text command from UI ──────────────────────────────────────────
             elif msg_type == "text":
@@ -192,8 +282,7 @@ async def handle_client(websocket):
     except Exception as e:
         logger.error("handler_error", error=str(e))
     finally:
-        connected_clients.discard(websocket)
-        logger.info("client_disconnected", total=len(connected_clients))
+        logger.info("client_disconnected")
 
 
 async def main():
