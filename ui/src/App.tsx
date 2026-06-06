@@ -172,6 +172,7 @@ export default function App() {
   const autoListenRef   = useRef(false);
   const activatedRef    = useRef(false);
   const recorderRef     = useRef<MediaRecorder | null>(null);
+  const bgAudioRef      = useRef<HTMLAudioElement | null>(null);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const addLog = (who: string, text: string) =>
@@ -186,12 +187,7 @@ export default function App() {
     ws.onclose = () => setTimeout(connectWS, 3000);
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-      if (msg.type === "audio") {
-        playAudio(msg.audio, () => {
-          setOrbState("idle");
-          if (autoListenRef.current && !isRunning) setTimeout(startListening, 800);
-        });
-      } else if (msg.type === "briefing_trigger") {
+      if (msg.type === "briefing_trigger") {
         runBriefing();
       } else if (msg.type === "single_agent_trigger") {
         runSingleAgent(msg.agent, msg.marvel);
@@ -204,6 +200,91 @@ export default function App() {
     connectWS();
     return () => wsRef.current?.close();
   }, [connectWS]);
+
+  // ── Hey Jarvis wake word ───────────────────────────────────────────────────
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let audioCtx: AudioContext | null = null;
+    let active = true;
+
+    async function listenForWakeWord() {
+      try {
+        stream   = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioCtx = new AudioContext();
+        const analyser = audioCtx.createAnalyser();
+        audioCtx.createMediaStreamSource(stream).connect(analyser);
+        analyser.fftSize = 256;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const recorder = new MediaRecorder(stream);
+        let chunks: Blob[] = [];
+        let recording = false;
+        let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+        recorder.onstart = () => {
+          setTimeout(() => {
+            if (recorder.state === "recording") recorder.stop();
+          }, 3000);
+        };
+        recorder.onstop = async () => {
+          if (!active) return;
+          const blob = new Blob(chunks, { type: "audio/webm" });
+          chunks = []; recording = false;
+          try {
+            const resp = await fetch(
+              "https://api.deepgram.com/v1/listen?model=nova-2&language=en",
+              {
+                method: "POST",
+                headers: {
+                  "Authorization": `Token ${import.meta.env.VITE_DEEPGRAM_API_KEY || ""}`,
+                  "Content-Type": "audio/webm",
+                },
+                body: blob,
+              }
+            );
+            const result = await resp.json();
+            const text = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript?.toLowerCase() || "";
+            console.log("Wake check:", text);
+            if (text.includes("hey jarvis") || text.includes("hi jarvis") || text.includes("okay jarvis")) {
+              active = false;
+              stream?.getTracks().forEach(t => t.stop());
+              audioCtx?.close();
+              wakeJarvis();
+              return;
+            }
+          } catch {}
+          if (active) setTimeout(listenForWakeWord, 300);
+        };
+
+        const check = () => {
+          if (!active) return;
+          analyser.getByteFrequencyData(data);
+          const avg = data.reduce((a, b) => a + b, 0) / data.length;
+          if (!recording && avg > 10) {
+            recording = true;
+            chunks = [];
+            recorder.start();
+          } else if (recording && avg < 5) {
+            if (!silenceTimer) silenceTimer = setTimeout(() => {
+              if (recorder.state === "recording") recorder.stop();
+            }, 600);
+          } else if (recording && avg >= 5) {
+            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+          }
+          requestAnimationFrame(check);
+        };
+        check();
+      } catch (e) { console.error("Wake word error:", e); }
+    }
+
+    const t = setTimeout(listenForWakeWord, 1000);
+    return () => {
+      active = false;
+      clearTimeout(t);
+      stream?.getTracks().forEach(t => t.stop());
+      audioCtx?.close();
+    };
+  }, []);
 
   // ── Audio unlock ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -221,67 +302,32 @@ export default function App() {
     };
   }, []);
 
-  // ── Clap detection ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    let audioCtx: AudioContext | null = null;
-    let activated = false;
 
-    async function startClap() {
-      try {
-        stream  = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioCtx = new AudioContext();
-        const analyser = audioCtx.createAnalyser();
-        audioCtx.createMediaStreamSource(stream).connect(analyser);
-        analyser.fftSize = 256;
-        const data = new Uint8Array(analyser.frequencyBinCount);
 
-        let clapCount = 0;
-        let lastClap  = 0;
-        let timer: ReturnType<typeof setTimeout> | null = null;
-
-        const detect = () => {
-          if (activated) return;
-          if (wsRef.current?.readyState !== WebSocket.OPEN) { requestAnimationFrame(detect); return; }
-          analyser.getByteFrequencyData(data);
-          const peak = Math.max(...Array.from(data));
-          const now  = Date.now();
-
-          if (peak > 200 && now - lastClap > 100) {
-            lastClap = now;
-            clapCount++;
-            if (timer) clearTimeout(timer);
-            if (clapCount >= 2) {
-              activated = true;
-              clapCount = 0;
-              stream?.getTracks().forEach(t => t.stop());
-              audioCtx?.close();
-              wakeJarvis();
-              return;
-            }
-            timer = setTimeout(() => { clapCount = 0; }, 800);
-          }
-          requestAnimationFrame(detect);
-        };
-        detect();
-      } catch {}
-    }
-
-    const t = setTimeout(startClap, 1000);
-    return () => {
-      clearTimeout(t);
-      stream?.getTracks().forEach(t => t.stop());
-      audioCtx?.close();
-    };
-  }, []);
+  // ── Background Music ──────────────────────────────────────────────────────
+  function startMusic() {
+    if (bgAudioRef.current) return;
+    try {
+      // Free cinematic ambient track from Pixabay (no copyright)
+      const audio = new Audio("/ambient.mp3");
+      audio.loop   = true;
+      audio.volume = 0.08;
+      bgAudioRef.current = audio;
+      (window as any).__jarvisMusic = audio;
+      audio.play().then(() => {
+        console.log("🎵 Music playing");
+      }).catch(e => console.log("Music blocked:", e));
+    } catch (e) { console.error(e); }
+  }
 
   // ── Wake Jarvis ───────────────────────────────────────────────────────────
   function wakeJarvis() {
+    startMusic();
     if (wsRef.current?.readyState === WebSocket.OPEN)
       wsRef.current.send(JSON.stringify({ type: "wake" }));
     const hour = new Date().getHours();
     const greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-    const msg   = `${greet} Chaitanya. I am online. What can I do for you?`;
+    const msg   = `Hey Boss! ${greet}. I am online and ready. What can I do for you?`;
     setScreen("awake");
     addLog("JARVIS", msg);
     setOrbState("speaking");
@@ -293,6 +339,12 @@ export default function App() {
   }
 
   // ── TTS ────────────────────────────────────────────────────────────────────
+  function duckMusic(duck: boolean) {
+    const audio = (window as any).__jarvisMusic;
+    if (!audio) return;
+    audio.volume = duck ? 0.02 : 0.08;
+  }
+
   function playAudio(b64: string, onEnd?: () => void) {
     try {
       const bytes = atob(b64);
@@ -301,8 +353,9 @@ export default function App() {
       for (let i = 0; i < bytes.length; i++) view[i] = bytes.charCodeAt(i);
       const url   = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
       const audio = new Audio(url);
-      audio.onended = () => { URL.revokeObjectURL(url); onEnd?.(); };
-      audio.onerror = () => { URL.revokeObjectURL(url); onEnd?.(); };
+      duckMusic(true);
+      audio.onended = () => { URL.revokeObjectURL(url); duckMusic(false); onEnd?.(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); duckMusic(false); onEnd?.(); };
       audio.play().catch(() => { browserSpeak("", onEnd); });
     } catch { onEnd?.(); }
   }
@@ -337,6 +390,16 @@ export default function App() {
           clearTimeout(timeout);
           wsRef.current!.onmessage = globalHandler;
           playAudio(msg.audio, resolve);
+        } else if (msg.type === "single_agent_trigger") {
+          clearTimeout(timeout);
+          wsRef.current!.onmessage = globalHandler;
+          resolve();
+          runSingleAgent(msg.agent, msg.marvel);
+        } else if (msg.type === "briefing_trigger") {
+          clearTimeout(timeout);
+          wsRef.current!.onmessage = globalHandler;
+          resolve();
+          runBriefing();
         } else if (globalHandler) globalHandler(e);
       };
       wsRef.current.send(JSON.stringify({ type: "tts", text }));
@@ -388,7 +451,7 @@ export default function App() {
         analyser.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
 
-        if (!recording && avg > 15) {
+        if (!recording && avg > 10) {
           recording = true;
           chunks = [];
           recorder.start();
@@ -397,7 +460,7 @@ export default function App() {
         } else if (recording && avg < 8) {
           if (!silenceTimer) silenceTimer = setTimeout(() => {
             if (recording) { recorder.stop(); if (maxTimer) clearTimeout(maxTimer); }
-          }, 1500);
+          }, 2500);
         } else if (recording && avg >= 8) {
           if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
         }
@@ -411,7 +474,6 @@ export default function App() {
   async function runSingleAgent(agentId: string, marvelName: string) {
     const agent = AGENTS.find(a => a.id === agentId || a.marvel.toLowerCase() === marvelName.toLowerCase());
     if (!agent) return;
-    setIsRunning(true);
     autoListenRef.current = false;
     setActiveAgent({ agent, status: "Initializing..." });
     setScreen("agent");
@@ -451,39 +513,41 @@ export default function App() {
   async function runBriefing() {
     setIsRunning(true);
     autoListenRef.current = false;
-    setScreen("orbit");
 
     for (const agent of AGENTS) {
-      if (!autoListenRef.current && isRunning) {
-        setActiveAgent({ agent, status: "Activating..." });
-        setScreen("agent");
-        setOrbState("processing");
+      setActiveAgent({ agent, status: "Initializing..." });
+      setScreen("agent");
+      setOrbState("processing");
 
-        try {
-          const res    = await fetch(`${JARVIS_API}/agents/run`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ command: agent.cmd }),
-          });
-          const data   = await res.json();
-          const status = data.response || "All systems nominal.";
-          setActiveAgent({ agent, status });
-          setOrbState("speaking");
-          await speakTTS(`${agent.marvel} reporting. ${status}`);
-        } catch {
-          setActiveAgent({ agent, status: "All systems nominal." });
-          setOrbState("speaking");
-          await speakTTS(`${agent.marvel} reporting. All systems nominal.`);
-        }
-        await new Promise(r => setTimeout(r, 1000));
+      try {
+        const res  = await fetch(`${JARVIS_API}/agents/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: agent.cmd }),
+        });
+        const data = await res.json();
+        const status = data.response || "All systems nominal.";
+        setActiveAgent({ agent, status });
+        setOrbState("speaking");
+        const speech = `${agent.marvel} reporting. ${status}`;
+        addLog(agent.marvel.toUpperCase(), speech);
+        await speakTTS(speech);
+      } catch {
+        const status = "All systems nominal.";
+        setActiveAgent({ agent, status });
+        setOrbState("speaking");
+        const speech = `${agent.marvel} reporting. All systems nominal.`;
+        addLog(agent.marvel.toUpperCase(), speech);
+        await speakTTS(speech);
       }
+      await new Promise(r => setTimeout(r, 1200));
     }
 
     setScreen("orbit");
     setOrbState("idle");
     setIsRunning(false);
     autoListenRef.current = true;
-    setTimeout(startListening, 800);
+    setTimeout(startListening, 1000);
   }
 
   // ── Orb color ──────────────────────────────────────────────────────────────
