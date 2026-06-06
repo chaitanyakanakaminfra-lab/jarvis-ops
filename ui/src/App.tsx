@@ -101,6 +101,118 @@ export default function App() {
 
   useEffect(() => { connectWS(); return () => { wsRef.current?.close(); }; }, []);
 
+  // Unlock audio on first user interaction
+  useEffect(() => {
+    const unlock = () => {
+      const ctx = new AudioContext();
+      ctx.resume().then(() => ctx.close());
+      document.removeEventListener("click", unlock);
+      document.removeEventListener("touchstart", unlock);
+    };
+    document.addEventListener("click", unlock);
+    document.addEventListener("touchstart", unlock);
+    return () => {
+      document.removeEventListener("click", unlock);
+      document.removeEventListener("touchstart", unlock);
+    };
+  }, []);
+
+  // Clap detection — starts listening for claps on page load
+  useEffect(() => {
+    let clapCount = 0;
+    let clapTimer: ReturnType<typeof setTimeout> | null = null;
+    let stream: MediaStream | null = null;
+    let audioContext: AudioContext | null = null;
+
+    async function startClapDetection() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new AudioContext();
+        const analyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        analyser.fftSize = 256;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+
+        let lastClapTime = 0;
+        let activated = false;
+        const CLAP_THRESHOLD = 200; // balanced threshold
+        const MIN_CLAP_INTERVAL = 100; // ms between claps
+        const MAX_CLAP_INTERVAL = 800; // max time between two claps
+
+        const detect = () => {
+          if (activated) return; // Stop detection after activation
+          if (wsRef.current?.readyState !== WebSocket.OPEN) {
+            requestAnimationFrame(detect);
+            return;
+          }
+          analyser.getByteFrequencyData(data);
+          const peak = Math.max(...Array.from(data));
+          const now = Date.now();
+
+          if (peak > CLAP_THRESHOLD && now - lastClapTime > MIN_CLAP_INTERVAL) {
+            lastClapTime = now;
+            clapCount++;
+
+            if (clapTimer) clearTimeout(clapTimer);
+            // Reset if second clap too slow
+            if (clapCount === 1) {
+              clapTimer = setTimeout(() => { clapCount = 0; }, MAX_CLAP_INTERVAL);
+            }
+
+            if (clapCount >= 2) {
+              clapCount = 0;
+              if (clapTimer) clearTimeout(clapTimer);
+
+              // Stop clap detection immediately
+              stream?.getTracks().forEach(t => t.stop());
+              audioContext?.close();
+
+              // Wake Jarvis ONCE
+              const hour = new Date().getHours();
+              const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+              const wakeMsg = `${greeting} Chaitanya. I am online. What can I do for you?`;
+
+              setScreen("awake");
+              addLog("jarvis", wakeMsg);
+              setOrbState("speaking");
+
+              // Tell voice server Jarvis is awake
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ type: "wake" }));
+              }
+
+              speakTTS(wakeMsg).then(() => {
+                setOrbState("idle");
+                autoListenRef.current = true;
+                // Wait 1 second for clap mic to fully release
+                setTimeout(() => startListening(), 1000);
+              });
+
+              activated = true; // Stop detection loop
+              return;
+            } else {
+              // Reset clap count after 1 second
+              clapTimer = setTimeout(() => { clapCount = 0; }, 1000);
+            }
+          }
+          requestAnimationFrame(detect);
+        };
+        detect();
+      } catch {
+        // Mic not available — fall back to tap
+      }
+    }
+
+    // Start clap detection after short delay
+    const timer = setTimeout(startClapDetection, 1000);
+    return () => {
+      clearTimeout(timer);
+      stream?.getTracks().forEach(t => t.stop());
+      audioContext?.close();
+    };
+  }, []);
+
   function connectWS() {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     try {
@@ -190,7 +302,10 @@ export default function App() {
           const b64 = btoa(String.fromCharCode(...new Uint8Array(ab)));
           wsRef.current?.send(JSON.stringify({ type: "audio", audio: b64 }));
         } else {
-          setTimeout(() => startListening(), 300);
+          // Only restart if still in auto-listen mode
+          if (autoListenRef.current && !isBriefing) {
+            setTimeout(() => startListening(), 1000);
+          }
         }
       };
       const interval = setInterval(() => {
@@ -224,6 +339,49 @@ export default function App() {
   function addLog(role: string, text: string) {
     const t = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
     setTranscript(prev => [...prev.slice(-50), `${t} [${role.toUpperCase()}]: ${text}`]);
+  }
+
+  async function runSingleAgent(agentName: string, marvelName: string) {
+    setIsBriefing(true);
+    autoListenRef.current = false;
+
+    const agentData = ALL_AGENTS.find(a => a.agent === agentName);
+    if (!agentData) {
+      setIsBriefing(false);
+      return;
+    }
+
+    const category = AGENT_CATEGORIES[agentName] || "CI/CD";
+    setScreen("agent");
+    setActiveAgent({ name: agentName, status: "Initializing...", category, index: 0 });
+    setOrbState("thinking");
+
+    try {
+      const res = await fetch(`${JARVIS_API}/agents/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: agentData.cmd }),
+      });
+      const data = await res.json();
+      const status = data.response || "Systems nominal.";
+      setActiveAgent({ name: agentName, status, category, index: 0 });
+      setOrbState("speaking");
+      const speech = `${marvelName} reporting. ${status}`;
+      addLog("agent", speech);
+      await speakTTS(speech);
+    } catch {
+      const speech = `${marvelName} reporting. All systems nominal.`;
+      setActiveAgent({ name: agentName, status: "All systems nominal.", category, index: 0 });
+      addLog("agent", speech);
+      await speakTTS(speech);
+    }
+
+    await new Promise(r => setTimeout(r, 2000));
+    setScreen("awake");
+    setOrbState("idle");
+    setIsBriefing(false);
+    autoListenRef.current = true;
+    setTimeout(() => startListening(), 500);
   }
 
   async function runBriefing() {
@@ -338,7 +496,9 @@ export default function App() {
               {isRecording ? "● LISTENING" : "● TAP TO ACTIVATE"}
             </div>
             <div style={{ fontSize: 22, color: "#e2e0ff", fontWeight: 300, marginBottom: 8 }}>Say "Hey Jarvis"</div>
-            <div style={{ fontSize: 11, color: "#334155" }}>to initialize all systems</div>
+            <div style={{ fontSize: 11, color: "#334155", marginBottom: 8 }}>to initialize all systems</div>
+            <div style={{ fontSize: 11, color: "#6366f144", letterSpacing: "0.2em" }}>— or —</div>
+            <div style={{ fontSize: 14, color: "#6366f188", marginTop: 8 }}>👏 Clap twice to activate</div>
           </div>
 
           {/* Status */}
