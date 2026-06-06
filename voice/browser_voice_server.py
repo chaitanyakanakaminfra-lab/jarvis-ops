@@ -179,6 +179,11 @@ async def handle_client(websocket):
                 await speak(websocket, response)
                 await websocket.send(json.dumps({"type": "status", "message": "idle"}))
 
+            elif msg_type == "wake":
+                # UI woke Jarvis via clap — sync state
+                jarvis_awake = True
+                logger.info("jarvis_awake_via_clap")
+
             elif msg_type == "ping":
                 await websocket.send(json.dumps({"type": "pong"}))
 
@@ -187,9 +192,8 @@ async def handle_client(websocket):
     except Exception as e:
         logger.error("handler_error", error=str(e))
     finally:
-        if active_client == websocket:
-            globals()["active_client"] = None
-        logger.info("client_disconnected")
+        connected_clients.discard(websocket)
+        logger.info("client_disconnected", total=len(connected_clients))
 
 
 async def main():
