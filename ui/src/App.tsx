@@ -42,8 +42,8 @@ const AGENTS: AgentInfo[] = [
   { id: "reporting",   marvel: "Dr Strange",    icon: "📊", role: "Reporting",            color: "#a78bfa", cmd: "generate report",               orbit: "outer", priority: 15 },
 ];
 
-const JARVIS_API = "https://jarvis-ops.site/api";
-const JARVIS_WS  = "wss://jarvis-ops.site/voice-ws";
+const JARVIS_API = "https://jarvis-ops.site";
+const JARVIS_WS  = "wss://ws.jarvis-ops.site/voice-ws";
 
 // ─── Arc Reactor SVG Component ────────────────────────────────────────────────
 function ArcReactor({ size = 180, color = "#22c55e", speed = 1 }: { size?: number; color?: string; speed?: number }) {
@@ -137,29 +137,6 @@ function ArcReactor({ size = 180, color = "#22c55e", speed = 1 }: { size?: numbe
   );
 }
 
-// ─── Orbit Agent Bubble ───────────────────────────────────────────────────────
-function OrbitAgent({ agent, animName }: { agent: AgentInfo; animName: string }) {
-  const sizes = { inner: 30, mid: 27, outer: 24 };
-  const fontSize = { inner: 14, mid: 12, outer: 11 };
-  const size = sizes[agent.orbit];
-  return (
-    <div style={{ position: "absolute", animation: `${animName} ${agent.orbit === "inner" ? 12 : agent.orbit === "mid" ? 18 : 24}s linear infinite` }}>
-      <div style={{
-        width: size, height: size,
-        background: "#0a0a18",
-        border: `${agent.orbit === "inner" ? 2 : 1.5}px solid ${agent.color}`,
-        borderRadius: "50%",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: fontSize[agent.orbit],
-        boxShadow: `0 0 ${agent.orbit === "inner" ? 20 : agent.orbit === "mid" ? 14 : 10}px ${agent.color}44`,
-        cursor: "default",
-      }}>
-        {agent.icon}
-      </div>
-    </div>
-  );
-}
-
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen,       setScreen]       = useState<Screen>("landing");
@@ -170,7 +147,6 @@ export default function App() {
 
   const wsRef           = useRef<WebSocket | null>(null);
   const autoListenRef   = useRef(false);
-  const activatedRef    = useRef(false);
   const recorderRef     = useRef<MediaRecorder | null>(null);
   const bgAudioRef      = useRef<HTMLAudioElement | null>(null);
 
@@ -400,7 +376,7 @@ export default function App() {
           wsRef.current!.onmessage = globalHandler;
           resolve();
           runBriefing();
-        } else if (globalHandler) globalHandler(e);
+        } else if (globalHandler) (globalHandler as (e: MessageEvent) => void).call(wsRef.current, e);
       };
       wsRef.current.send(JSON.stringify({ type: "tts", text }));
     });
@@ -563,13 +539,6 @@ export default function App() {
   const innerAgents = AGENTS.filter(a => a.orbit === "inner");
   const midAgents   = AGENTS.filter(a => a.orbit === "mid");
   const outerAgents = AGENTS.filter(a => a.orbit === "outer");
-
-  function agentAnimName(agent: AgentInfo, idx: number) {
-    const base = agent.orbit === "inner" ? 360 / innerAgents.length
-               : agent.orbit === "mid"   ? 360 / midAgents.length
-               :                           360 / outerAgents.length;
-    return `jar-orbit-${agent.orbit}-${idx}`;
-  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // CSS Keyframes injected globally

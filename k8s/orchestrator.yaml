@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jarvis-orchestrator
+  namespace: jarvis
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jarvis-orchestrator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: jarvis-orchestrator
+    spec:
+      containers:
+      - name: orchestrator
+        image: 535709430661.dkr.ecr.us-east-1.amazonaws.com/jarvis-orchestrator:latest
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - secretRef:
+            name: jarvis-secrets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jarvis-orchestrator
+  namespace: jarvis
+spec:
+  selector:
+    app: jarvis-orchestrator
+  ports:
+  - port: 8000
+    targetPort: 8000

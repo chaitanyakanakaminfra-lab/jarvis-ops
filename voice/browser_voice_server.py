@@ -206,7 +206,7 @@ async def handle_client(websocket):
                     await websocket.send(json.dumps({"type": "status", "message": "idle"}))
                     continue
 
-                if any(w in text_lower for w in ["wake up all", "wakeup all", "all agents", "wake all", "start all", "briefing", "morning briefing", "pick up all"]):
+                if any(w in text_lower for w in ["wake up all", "wakeup all", "all agents", "wake all", "start all", "briefing", "morning briefing", "pick up all", "pick up our", "pick up the", "wake our", "wake the", "all avengers", "assemble", "wake everyone", "start agents", "run all", "activate all"]):
                     jarvis_awake = True
                     response = "Waking up all agents now. Stand by."
                     await websocket.send(json.dumps({"type": "response", "text": response}))
@@ -285,20 +285,40 @@ async def handle_client(websocket):
         logger.info("client_disconnected")
 
 
+async def health_server():
+    """Simple HTTP health check on port 8766"""
+    from aiohttp import web
+    async def health(request):
+        return web.Response(text="ok")
+    app = web.Application()
+    app.router.add_get("/health", health)
+    app.router.add_get("/", health)
+    app.router.add_get("/voice-ws", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 8766)
+    await site.start()
+    logger.info("health_server.started", port=8766)
+
 async def main():
     from dotenv import load_dotenv
     load_dotenv()
 
-    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ssl_context.load_cert_chain(
-        certfile="/home/ubuntu/jarvis-ops/certs/fullchain.pem",
-        keyfile="/home/ubuntu/jarvis-ops/certs/privkey.pem",
-    )
+    # SSL optional — use certs if on EC2, skip in containers
+    ssl_context = None
+    cert = "/home/ubuntu/jarvis-ops/certs/fullchain.pem"
+    key  = "/home/ubuntu/jarvis-ops/certs/privkey.pem"
+    if os.path.exists(cert) and os.path.exists(key):
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(certfile=cert, keyfile=key)
 
-    logger.info("browser_voice_server.starting", port=8765, ssl=True)
+    logger.info("browser_voice_server.starting", port=8765, ssl=ssl_context is not None)
     async with websockets.serve(handle_client, "0.0.0.0", 8765, ssl=ssl_context):
         logger.info("browser_voice_server.ready")
-        await asyncio.Future()
+        await asyncio.gather(
+            asyncio.Future(),
+            health_server(),
+        )
 
 
 if __name__ == "__main__":

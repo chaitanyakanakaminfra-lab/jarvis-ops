@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 import structlog
-from langchain_deepseek import ChatDeepSeek
+from langchain_openai import ChatOpenAI
 from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_classic.memory import ConversationBufferWindowMemory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -44,9 +44,11 @@ class JarvisBrain:
         ])
 
         import os
-        os.environ["DEEPSEEK_API_KEY"] = self.settings.deepseek_api_key
-        llm = ChatDeepSeek(
-            model="deepseek-chat",
+        os.environ["OPENAI_API_KEY"] = os.getenv("KIMCHI_API_KEY", "")
+        llm = ChatOpenAI(
+            model="minimax-m2.5",
+            base_url="https://api.kimchi.dev/v1",
+            api_key=os.getenv("KIMCHI_API_KEY", ""),
             temperature=0,
         )
 
