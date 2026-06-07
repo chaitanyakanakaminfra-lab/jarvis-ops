@@ -22,3 +22,4 @@ node_modules/
 certs/
 ui/cert.pem
 ui/key.pem
+k8s/secrets.yaml

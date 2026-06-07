@@ -156,12 +156,15 @@ async def handle_client(websocket):
 
                 # Wake up all agents
                 # Single agent detection
+                # Also handle partial transcriptions by checking for agent names anywhere
                 marvel_map = {
                     "iron man":      "cicd",
                     "vision":        "lint",
                     "war machine":   "docker",
                     "nick fury":     "release",
                     "thor":          "infra",
+                    "store":         "infra",
+                    "four":          "infra",
                     "store":         "infra",
                     "sir":           "infra",
                     "four":          "infra",
@@ -179,10 +182,13 @@ async def handle_client(websocket):
                     "captain marvel":"compliance",
                     "cap marvel":    "compliance",
                     "hawkeye":       "observe",
+                    "hawk":          "observe",
+                    "hawk eye":      "observe",
                     "hawk eye":      "observe",
                     "hockey":        "observe",
                     "hot guy":       "observe",
                     "spider man":    "incident",
+                    "spider":        "incident",
                     "spider-man":    "incident",
                     "spiderman":     "incident",
                     "doctor strange":"reporting",

@@ -236,7 +236,7 @@ export default function App() {
           if (!active) return;
           analyser.getByteFrequencyData(data);
           const avg = data.reduce((a, b) => a + b, 0) / data.length;
-          if (!recording && avg > 10) {
+          if (!recording && avg > 8) {
             recording = true;
             chunks = [];
             recorder.start();
@@ -427,7 +427,7 @@ export default function App() {
         analyser.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
 
-        if (!recording && avg > 10) {
+        if (!recording && avg > 8) {
           recording = true;
           chunks = [];
           recorder.start();
@@ -436,7 +436,7 @@ export default function App() {
         } else if (recording && avg < 8) {
           if (!silenceTimer) silenceTimer = setTimeout(() => {
             if (recording) { recorder.stop(); if (maxTimer) clearTimeout(maxTimer); }
-          }, 2500);
+          }, 3000);
         } else if (recording && avg >= 8) {
           if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
         }

@@ -47,7 +47,7 @@ class JarvisBrain:
         os.environ["OPENAI_API_KEY"] = os.getenv("KIMCHI_API_KEY", "")
         llm = ChatOpenAI(
             model="minimax-m2.5",
-            base_url="https://api.kimchi.dev/v1",
+            base_url="https://llm.kimchi.dev/openai/v1",
             api_key=os.getenv("KIMCHI_API_KEY", ""),
             temperature=0,
         )
@@ -73,6 +73,9 @@ class JarvisBrain:
                 "chat_history": self._memory.chat_memory.messages,
             })
             response = result.get("output", "Task completed.")
+            # Strip thinking tags from Kimchi reasoning model
+            import re
+            response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
             logger.info("brain.response", response=response[:100])
             return response
         except Exception as e:
